@@ -1,0 +1,84 @@
+name: OurDomain Telegram Watcher
+
+on:
+  workflow_dispatch:
+    inputs:
+      send_test_message:
+        description: "Send a Telegram test message (true/false)"
+        required: false
+        default: "false"
+
+  schedule:
+    - cron: "3-59/5 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ourdomain-telegram-watcher
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check OurDomain floorplans
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      OURDOMAIN_URL: "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing/ourdomain-amsterdam-south-east/floorplans.aspx"
+      SEND_EXISTING_ON_FIRST_RUN: "false"
+      STATE_PATH: "ourdomain_state.json"
+      HEADLESS: "true"
+      BROWSER_LOCALE: "en-GB"
+      SLOW_MO_MS: "0"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium with system dependencies
+        run: python -m playwright install --with-deps chromium
+
+      - name: Send Telegram smoke-test message
+        if: ${{ github.event.inputs.send_test_message == 'true' }}
+        run: |
+          curl -s -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=%E2%9C%85%20OurDomain%20GitHub%20Actions%20Telegram%20test%20works." \
+            -d "disable_web_page_preview=true" \
+            -o /dev/null
+          echo "Smoke-test message sent."
+
+      - name: Run OurDomain watcher (one shot)
+        run: python ourdomain_github_once.py
+
+      - name: Commit updated OurDomain state (if changed)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ourdomain_state.json
+          if git diff --cached --quiet; then
+            echo "No changes to ourdomain_state.json - nothing to commit."
+          else
+            git commit -m "chore: update OurDomain state [skip ci]"
+            git push
+          fi

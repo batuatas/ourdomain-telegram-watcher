@@ -1,0 +1,19 @@
+# Secrets - never commit these
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Logs and debug output
+*.log
+debug_*.txt
+screenshots/
+
+# NOTE: ourdomain_state.json is intentionally NOT ignored.
+# GitHub Actions commits it back after each run to persist floorplan state.
