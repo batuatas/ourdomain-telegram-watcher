@@ -33,6 +33,11 @@ def main() -> int:
         f"[ourdomain-once] send_existing_on_first_run={os.getenv('SEND_EXISTING_ON_FIRST_RUN', 'false')}",
         flush=True,
     )
+    print(f"[ourdomain-once] send_heartbeat={os.getenv('SEND_HEARTBEAT', 'true')}", flush=True)
+    print(
+        f"[ourdomain-once] heartbeat_interval_minutes={os.getenv('HEARTBEAT_INTERVAL_MINUTES', '60')}",
+        flush=True,
+    )
     print(f"[ourdomain-once] headless={os.getenv('HEADLESS', 'true')}", flush=True)
     print(f"[ourdomain-once] browser_locale={os.getenv('BROWSER_LOCALE', 'en-GB')}", flush=True)
     print(f"[ourdomain-once] slow_mo_ms={os.getenv('SLOW_MO_MS', '0')}", flush=True)

@@ -119,6 +119,18 @@ def now_utc() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def parse_utc(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def normalize_space(value: str) -> str:
     value = value.replace("\xa0", " ")
     value = re.sub(r"[ \t\r\f\v]+", " ", value)
@@ -428,6 +440,28 @@ def format_telegram_message(result: PlanResult, url: str) -> str:
     return "\n".join(parts)
 
 
+def format_heartbeat_message(
+    checked_at: str,
+    checks_since_last: int,
+    total_checks: int,
+    found_plans: int,
+    alert_worthy: int,
+    alerts_sent: int,
+    url: str,
+) -> str:
+    parts = [
+        "✅ <b>OurDomain watcher heartbeat</b>",
+        f"<b>Checked:</b> {html.escape(checked_at)}",
+        f"<b>Checks since last heartbeat:</b> {checks_since_last}",
+        f"<b>Total successful checks:</b> {total_checks}",
+        f"<b>Floor plans found:</b> {found_plans}/{len(TARGET_FLOOR_PLANS)}",
+        f"<b>Alert-worthy states this run:</b> {alert_worthy}",
+        f"<b>Availability alerts sent this run:</b> {alerts_sent}",
+        f"<b>URL:</b> {html.escape(url, quote=True)}",
+    ]
+    return "\n".join(parts)
+
+
 def send_telegram_message(token: str, chat_id: str, text: str) -> None:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set; cannot send Telegram alert.")
@@ -462,6 +496,30 @@ def update_state_for_result(
     }
 
 
+def update_heartbeat_counters(state: dict[str, Any]) -> tuple[dict[str, Any], int, int]:
+    heartbeat = state.get("heartbeat")
+    if not isinstance(heartbeat, dict):
+        heartbeat = {}
+        state["heartbeat"] = heartbeat
+
+    total_checks = int(heartbeat.get("total_checks", 0) or 0) + 1
+    checks_since_last = int(heartbeat.get("checks_since_last", 0) or 0) + 1
+    heartbeat["total_checks"] = total_checks
+    heartbeat["checks_since_last"] = checks_since_last
+    return heartbeat, checks_since_last, total_checks
+
+
+def heartbeat_is_due(heartbeat: dict[str, Any], checked_at: str, interval_minutes: int) -> bool:
+    last_sent = parse_utc(str(heartbeat.get("last_sent_at", "")))
+    checked = parse_utc(checked_at)
+
+    if last_sent is None or checked is None:
+        return True
+
+    elapsed_seconds = (checked - last_sent).total_seconds()
+    return elapsed_seconds >= interval_minutes * 60
+
+
 def check_once(
     token: str = "",
     chat_id: str = "",
@@ -474,6 +532,8 @@ def check_once(
     plans_state = state.get("plans", {})
     is_first_run = not plans_state
     send_existing_on_first_run = env_bool("SEND_EXISTING_ON_FIRST_RUN", False)
+    send_heartbeat = env_bool("SEND_HEARTBEAT", True)
+    heartbeat_interval_minutes = max(1, env_int("HEARTBEAT_INTERVAL_MINUTES", 60))
     checked_at = now_utc()
 
     found_plans = 0
@@ -487,6 +547,11 @@ def check_once(
     print(f"[ourdomain] url={url}", flush=True)
     print(f"[ourdomain] state_path={state_path}", flush=True)
     print(f"[ourdomain] send_existing_on_first_run={send_existing_on_first_run}", flush=True)
+    print(
+        f"[ourdomain] send_heartbeat={send_heartbeat} "
+        f"heartbeat_interval_minutes={heartbeat_interval_minutes}",
+        flush=True,
+    )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless, slow_mo=slow_mo)
@@ -571,6 +636,36 @@ def check_once(
 
                 store_signature = bool(result.alert_worthy)
                 update_state_for_result(state, result, store_signature)
+
+            heartbeat, checks_since_last, total_checks = update_heartbeat_counters(state)
+            should_send_heartbeat = (
+                send_heartbeat
+                and heartbeat_is_due(heartbeat, checked_at, heartbeat_interval_minutes)
+            )
+
+            print(
+                f"[ourdomain] heartbeat checks_since_last={checks_since_last} "
+                f"total_checks={total_checks} send={should_send_heartbeat}",
+                flush=True,
+            )
+
+            if should_send_heartbeat:
+                send_telegram_message(
+                    token,
+                    chat_id,
+                    format_heartbeat_message(
+                        checked_at=checked_at,
+                        checks_since_last=checks_since_last,
+                        total_checks=total_checks,
+                        found_plans=found_plans,
+                        alert_worthy=alert_worthy,
+                        alerts_sent=sent,
+                        url=url,
+                    ),
+                )
+                sent += 1
+                heartbeat["last_sent_at"] = checked_at
+                heartbeat["checks_since_last"] = 0
 
             state["last_checked_at"] = checked_at
             state["url"] = url

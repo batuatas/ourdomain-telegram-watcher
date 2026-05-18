@@ -44,6 +44,28 @@ The workflow lives at `.github/workflows/ourdomain-check.yml` and runs on:
 
 GitHub scheduled workflows can be delayed during busy periods, so this is near-real-time rather than exact.
 
+## Hourly Heartbeat
+
+The workflow sends a Telegram heartbeat message by default so you know the watcher is still running even when nothing changed.
+
+Default settings:
+
+```text
+SEND_HEARTBEAT=true
+HEARTBEAT_INTERVAL_MINUTES=60
+```
+
+The heartbeat includes:
+
+- checked time
+- checks since the previous heartbeat
+- total successful checks
+- floor plans found
+- alert-worthy states seen in that run
+- availability alerts sent in that run
+
+To send a status message on every scheduled check, set `HEARTBEAT_INTERVAL_MINUTES=5` in `.github/workflows/ourdomain-check.yml`.
+
 ## Smoke Test
 
 After the repository is on GitHub and secrets are configured:
@@ -95,6 +117,8 @@ python ourdomain_github_once.py
 ## State Persistence
 
 `ourdomain_state.json` stores the last observed button text, status, alert signature, check time, and context per floor plan. It contains no Telegram secrets and is intentionally tracked by git.
+
+It also stores heartbeat counters so the hourly status message can report how many successful checks happened since the previous heartbeat.
 
 GitHub Actions commits this file after each run when it changes:
 

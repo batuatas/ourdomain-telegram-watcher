@@ -29,6 +29,8 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       OURDOMAIN_URL: "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing/ourdomain-amsterdam-south-east/floorplans.aspx"
       SEND_EXISTING_ON_FIRST_RUN: "false"
+      SEND_HEARTBEAT: "true"
+      HEARTBEAT_INTERVAL_MINUTES: "60"
       STATE_PATH: "ourdomain_state.json"
       HEADLESS: "true"
       BROWSER_LOCALE: "en-GB"
