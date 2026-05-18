@@ -1,4 +1,77 @@
 {
-  "plans": {},
+  "last_checked_at": "2026-05-18T21:51:56+00:00",
+  "plans": {
+    "1 Bedroom": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "1 Bedroom Superior": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "2 Bedroom": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "2 Bedroom Superior": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "Executive Plus Studio": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "Executive Plus Studio - Furnished": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "Executive Studio": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "Standard Studio": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "Studio Suite": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    },
+    "Superior Studio": {
+      "last_alert_signature": "",
+      "last_button_text": "",
+      "last_checked_at": "2026-05-18T21:51:56+00:00",
+      "last_seen_context": "",
+      "last_status": "missing_tab"
+    }
+  },
+  "url": "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing/ourdomain-amsterdam-south-east/floorplans.aspx",
   "version": 1
 }
