@@ -52,6 +52,8 @@ UNAVAILABLE_BUTTON_TEXTS = {
 }
 
 AVAILABLE_BUTTON_TEXTS = {
+    "CHECK AVAILABILITY",
+    "AVAILABLE",
     "APPLY",
     "APPLY NOW",
     "SELECT",
@@ -76,10 +78,19 @@ NON_ACTION_BUTTON_TEXTS = {
 
 ACTION_BUTTON_SELECTOR = ", ".join(
     [
+        "button.applyButton",
+        "a.applyButton",
+        "input.applyButton",
         "button.contactButton",
         "a.contactButton",
+        "input.contactButton",
         "button.btn-primary",
         "a.btn-primary",
+        "input.btn-primary",
+        "button",
+        "a",
+        "[role='button']",
+        "[onclick]",
         "input[type='button']",
         "input[type='submit']",
     ]
@@ -91,6 +102,7 @@ class PlanResult:
     plan_name: str
     button_text: str
     status: str
+    mode: str
     alert_worthy: bool
     alert_signature: str
     context: str
@@ -142,6 +154,10 @@ def normalize_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", normalize_space(value).casefold())
 
 
+def upper_text(value: str) -> str:
+    return normalize_space(value).upper()
+
+
 def floor_plan_label_key(value: str) -> str:
     value = normalize_space(value)
     value = re.sub(r"\([^)]*\)", "", value)
@@ -154,10 +170,69 @@ def text_matches_floor_plan(text: str, plan_name: str) -> bool:
     return text_key == plan_key
 
 
+def plan_matches_text(plan_name: str, text: str) -> bool:
+    haystack = upper_text(text)
+    aliases = [
+        plan_name,
+        f"{plan_name} (monthly income required)",
+    ]
+    return any(upper_text(alias) in haystack for alias in aliases)
+
+
 def normalize_button_text(value: str) -> str:
     value = normalize_space(value)
     value = re.sub(r"\s+", " ", value)
     return value.strip().upper()
+
+
+def is_unavailable_action_text(text: str) -> bool:
+    value = upper_text(text)
+    return (
+        value == "GET NOTIFIED"
+        or "CONTACT FOR AVAILABILITY" in value
+        or "NOT AVAILABLE" in value
+        or "NO APARTMENTS AVAILABLE" in value
+    )
+
+
+def text_contains_unavailable_signal(text: str) -> bool:
+    value = upper_text(text)
+    return any(phrase in value for phrase in UNAVAILABLE_BUTTON_TEXTS)
+
+
+def is_available_action_text(text: str) -> bool:
+    value = upper_text(text)
+
+    if is_unavailable_action_text(value) or text_contains_unavailable_signal(value):
+        return False
+
+    return (
+        value == "CHECK AVAILABILITY"
+        or "CHECK AVAILABILITY" in value
+        or value == "AVAILABLE"
+        or value == "AVAILABLE NOW"
+        or value == "APPLY"
+        or value == "APPLY NOW"
+        or value == "SELECT"
+        or value == "SELECT APARTMENT"
+        or value == "START"
+        or value == "START APPLICATION"
+        or value == "RESERVE"
+        or value == "RESERVE NOW"
+        or value == "LEASE"
+        or value == "LEASE NOW"
+        or value == "CONTINUE"
+        or value == "CONTINUE APPLICATION"
+    )
+
+
+def is_availability_text_signal(text: str) -> bool:
+    value = upper_text(text)
+
+    if is_unavailable_action_text(value) or text_contains_unavailable_signal(value):
+        return False
+
+    return "(AVAILABLE)" in value or "CHECK AVAILABILITY" in value
 
 
 def compact_context(value: str, limit: int = 900) -> str:
@@ -179,17 +254,17 @@ def compact_context(value: str, limit: int = 900) -> str:
     return text[: limit - 1].rstrip() + "..."
 
 
-def classify_button_text(button_text: str, previous_button_text: str = "") -> tuple[str, bool]:
+def classify_action_state(button_text: str, context: str, previous_button_text: str = "") -> tuple[str, bool]:
     normalized = normalize_button_text(button_text)
+
+    if is_unavailable_action_text(button_text) or text_contains_unavailable_signal(context):
+        return "unavailable", False
+
+    if is_available_action_text(button_text) or is_availability_text_signal(context):
+        return "available_like", True
 
     if not normalized:
         return "missing_button", False
-
-    if normalized in UNAVAILABLE_BUTTON_TEXTS:
-        return "unavailable", False
-
-    if normalized in AVAILABLE_BUTTON_TEXTS:
-        return "available", True
 
     if previous_button_text and normalized != normalize_button_text(previous_button_text):
         return "unknown_changed", True
@@ -205,6 +280,20 @@ def make_alert_signature(plan_name: str, status: str, button_text: str, context:
     if len(context_key) > 500:
         context_key = context_key[:500]
     return "|".join([normalize_key(plan_name), status, normalize_button_text(button_text), context_key])
+
+
+def is_cloudflare_challenge(title: str, body_text: str) -> bool:
+    text = "\n".join([title, body_text]).casefold()
+    indicators = [
+        "just a moment",
+        "cloudflare",
+        "checking your browser",
+        "cf-challenge",
+        "cf-mitigated",
+        "challenge-platform",
+        "verify you are human",
+    ]
+    return any(indicator in text for indicator in indicators)
 
 
 def load_state(path: str) -> dict[str, Any]:
@@ -309,6 +398,84 @@ def click_floor_plan(handle: Any, plan_name: str) -> bool:
         return False
 
 
+def get_visible_floor_plan_panels(page: Any) -> list[dict[str, Any]]:
+    panels: list[dict[str, Any]] = []
+
+    for handle in page.locator('div[id^="FP_Detail_"]').element_handles():
+        if not is_visible(handle):
+            continue
+
+        try:
+            panel_id = handle.get_attribute("id") or ""
+        except PlaywrightError:
+            panel_id = ""
+
+        try:
+            class_name = handle.get_attribute("class") or ""
+        except PlaywrightError:
+            class_name = ""
+
+        text = safe_text(handle)
+        panels.append(
+            {
+                "handle": handle,
+                "id": panel_id,
+                "class_name": class_name,
+                "text": normalize_space(text),
+            }
+        )
+
+    return panels
+
+
+def find_active_panel_for_plan(page: Any, plan_name: str) -> Optional[dict[str, Any]]:
+    panels = get_visible_floor_plan_panels(page)
+    if not panels:
+        return None
+
+    active_panels = [
+        panel
+        for panel in panels
+        if "active" in str(panel.get("class_name", "")).split()
+    ]
+    source = active_panels or panels
+
+    for panel in source:
+        if plan_matches_text(plan_name, str(panel.get("text", ""))):
+            return panel
+
+    if len(source) == 1:
+        return source[0]
+
+    useful = [
+        panel
+        for panel in source
+        if (
+            is_availability_text_signal(str(panel.get("text", "")))
+            or is_unavailable_action_text(str(panel.get("text", "")))
+            or is_available_action_text(str(panel.get("text", "")))
+        )
+    ]
+    useful.sort(key=lambda panel: len(str(panel.get("text", ""))))
+    return useful[0] if useful else source[0]
+
+
+def wait_until_correct_panel_active(page: Any, plan_name: str, timeout_ms: int = 10000) -> tuple[bool, Optional[dict[str, Any]]]:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    last_panel: Optional[dict[str, Any]] = None
+
+    while time.monotonic() < deadline:
+        panel = find_active_panel_for_plan(page, plan_name)
+        last_panel = panel
+
+        if panel and plan_matches_text(plan_name, str(panel.get("text", ""))):
+            return True, panel
+
+        page.wait_for_timeout(250)
+
+    return False, last_panel
+
+
 def extract_button_context(button_handle: Any, page: Any) -> str:
     script = """
     (element) => {
@@ -351,11 +518,11 @@ def extract_button_context(button_handle: Any, page: Any) -> str:
     return compact_context(text)
 
 
-def find_visible_action_buttons(page: Any) -> list[Any]:
-    buttons: list[Any] = []
+def find_visible_action_buttons(container_handle: Any) -> list[dict[str, Any]]:
+    buttons: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    for handle in page.locator(ACTION_BUTTON_SELECTOR).element_handles():
+    for index, handle in enumerate(container_handle.query_selector_all(ACTION_BUTTON_SELECTOR)):
         if not is_visible(handle):
             continue
 
@@ -367,28 +534,45 @@ def find_visible_action_buttons(page: Any) -> list[Any]:
         text = safe_text(handle)
         if normalize_button_text(text) in NON_ACTION_BUTTON_TEXTS:
             continue
+
+        text = normalize_space(text)
+        if not text or len(text) > 140:
+            continue
+
+        try:
+            class_name = handle.get_attribute("class") or ""
+        except PlaywrightError:
+            class_name = ""
+
         marker = f"{normalize_button_text(text)}|{box}"
         if marker in seen:
             continue
         seen.add(marker)
-        buttons.append(handle)
+        buttons.append(
+            {
+                "handle": handle,
+                "index": index,
+                "text": text,
+                "class_name": class_name,
+            }
+        )
 
     return buttons
 
 
-def choose_best_button(buttons: list[Any]) -> Optional[Any]:
+def choose_best_button(buttons: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     if not buttons:
         return None
 
-    scored: list[tuple[int, Any]] = []
+    scored: list[tuple[int, dict[str, Any]]] = []
     for button in buttons:
-        text = normalize_button_text(safe_text(button))
-        if text in AVAILABLE_BUTTON_TEXTS:
+        text = str(button.get("text", ""))
+        if is_available_action_text(text):
             score = 0
-        elif text not in UNAVAILABLE_BUTTON_TEXTS and text:
-            score = 1
-        elif text in UNAVAILABLE_BUTTON_TEXTS:
+        elif is_unavailable_action_text(text):
             score = 2
+        elif text:
+            score = 1
         else:
             score = 3
         scored.append((score, button))
@@ -402,20 +586,54 @@ def inspect_plan(page: Any, plan_name: str, tab_handle: Any, previous: dict[str,
     if clicked:
         page.wait_for_timeout(1400)
 
-    buttons = find_visible_action_buttons(page)
-    print(f"[ourdomain] {plan_name}: found {len(buttons)} visible action/contact button(s).", flush=True)
+    panel_ok, panel = wait_until_correct_panel_active(page, plan_name)
+    if not panel or not panel_ok or not plan_matches_text(plan_name, str(panel.get("text", ""))):
+        context = compact_context(str(panel.get("text", ""))) if panel else ""
+        status = f"active_panel_not_target_plan"
+        signature = make_alert_signature(plan_name, status, "", context)
+        panel_id = str(panel.get("id", "")) if panel else ""
+        print(
+            f"[ourdomain] {plan_name}: ACTIVE_PANEL_NOT_TARGET_PLAN panel={panel_id!r}",
+            flush=True,
+        )
+        return PlanResult(
+            plan_name=plan_name,
+            button_text="",
+            status=status,
+            mode="ACTIVE_PANEL_NOT_TARGET_PLAN",
+            alert_worthy=False,
+            alert_signature=signature,
+            context=context,
+            checked_at=checked_at,
+        )
+
+    panel_handle = panel["handle"]
+    panel_text = str(panel.get("text", ""))
+    buttons = find_visible_action_buttons(panel_handle)
+    print(
+        f"[ourdomain] {plan_name}: panel={panel.get('id', '')!r} "
+        f"found {len(buttons)} visible action/contact button(s).",
+        flush=True,
+    )
 
     button = choose_best_button(buttons)
-    button_text = safe_text(button) if button else ""
-    context = extract_button_context(button, page) if button else ""
+    button_text = str(button.get("text", "")) if button else ""
+    mode = "ACTIVE_PANEL_BUTTON" if button else "NO_ACTIVE_PANEL_BUTTON"
+    context = compact_context(panel_text)
+
+    if not button and is_availability_text_signal(panel_text):
+        button_text = "CHECK AVAILABILITY"
+        mode = "ACTIVE_PANEL_TEXT_AVAILABLE_FALLBACK"
+
     previous_button_text = str(previous.get("last_button_text", ""))
-    status, alert_worthy = classify_button_text(button_text, previous_button_text)
+    status, alert_worthy = classify_action_state(button_text, context, previous_button_text)
     signature = make_alert_signature(plan_name, status, button_text, context)
 
     return PlanResult(
         plan_name=plan_name,
         button_text=normalize_space(button_text),
         status=status,
+        mode=mode,
         alert_worthy=alert_worthy,
         alert_signature=signature,
         context=context,
@@ -433,6 +651,7 @@ def format_telegram_message(result: PlanResult, url: str) -> str:
         f"<b>Floor plan:</b> {html.escape(result.plan_name)}",
         f"<b>Status:</b> {html.escape(result.status)}",
         f"<b>Button text:</b> {html.escape(result.button_text or 'No visible button')}",
+        f"<b>Mode:</b> {html.escape(result.mode)}",
         f"<b>Context:</b>\n{html.escape(context)}",
         f"<b>URL:</b> {html.escape(url, quote=True)}",
         f"<b>Checked:</b> {html.escape(result.checked_at)}",
@@ -448,6 +667,7 @@ def format_heartbeat_message(
     alert_worthy: int,
     alerts_sent: int,
     url: str,
+    problem: str = "",
 ) -> str:
     parts = [
         "✅ <b>OurDomain watcher heartbeat</b>",
@@ -459,6 +679,8 @@ def format_heartbeat_message(
         f"<b>Availability alerts sent this run:</b> {alerts_sent}",
         f"<b>URL:</b> {html.escape(url, quote=True)}",
     ]
+    if problem:
+        parts.insert(2, f"<b>Problem:</b> {html.escape(problem)}")
     return "\n".join(parts)
 
 
@@ -490,6 +712,7 @@ def update_state_for_result(
     state["plans"][result.plan_name] = {
         "last_button_text": result.button_text,
         "last_status": result.status,
+        "last_mode": result.mode,
         "last_alert_signature": result.alert_signature if should_store_alert_signature else "",
         "last_checked_at": result.checked_at,
         "last_seen_context": result.context,
@@ -586,8 +809,56 @@ def check_once(
                 title = page.title()
             except PlaywrightError:
                 pass
-            if "just a moment" in title.casefold():
-                print("[ourdomain] Page title indicates a Cloudflare challenge.", flush=True)
+
+            body_text = ""
+            try:
+                body_text = page.locator("body").inner_text(timeout=5000)
+            except PlaywrightError:
+                body_text = ""
+
+            cloudflare_challenge = is_cloudflare_challenge(title, body_text)
+            print(f"[ourdomain] cloudflare_challenge={cloudflare_challenge}", flush=True)
+
+            if cloudflare_challenge:
+                heartbeat, checks_since_last, total_checks = update_heartbeat_counters(state)
+                should_send_heartbeat = (
+                    send_heartbeat
+                    and heartbeat_is_due(heartbeat, checked_at, heartbeat_interval_minutes)
+                )
+                print(
+                    f"[ourdomain] heartbeat checks_since_last={checks_since_last} "
+                    f"total_checks={total_checks} send={should_send_heartbeat}",
+                    flush=True,
+                )
+
+                if should_send_heartbeat:
+                    send_telegram_message(
+                        token,
+                        chat_id,
+                        format_heartbeat_message(
+                            checked_at=checked_at,
+                            checks_since_last=checks_since_last,
+                            total_checks=total_checks,
+                            found_plans=0,
+                            alert_worthy=0,
+                            alerts_sent=0,
+                            url=url,
+                            problem="Cloudflare challenge detected; preserved previous floor-plan state.",
+                        ),
+                    )
+                    sent += 1
+                    heartbeat["last_sent_at"] = checked_at
+                    heartbeat["checks_since_last"] = 0
+
+                state["last_checked_at"] = checked_at
+                state["url"] = url
+                save_state(state_path, state)
+                print(
+                    f"[ourdomain] done cloudflare_challenge=true plans_found=0 "
+                    f"alert_worthy=0 alerts_sent={sent}",
+                    flush=True,
+                )
+                return 0, 0, sent
 
             tabs = find_floor_plan_tabs(page)
             print(f"[ourdomain] found {len(tabs)} target floor plan tab(s).", flush=True)
@@ -601,6 +872,7 @@ def check_once(
                         plan_name=plan_name,
                         button_text="",
                         status="missing_tab",
+                        mode="TAB_NOT_FOUND",
                         alert_worthy=False,
                         alert_signature=make_alert_signature(plan_name, "missing_tab", "", ""),
                         context="",
