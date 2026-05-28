@@ -1,15 +1,15 @@
 {
   "heartbeat": {
     "checks_since_last": 0,
-    "last_sent_at": "2026-05-28T05:48:48+00:00",
-    "total_checks": 101
+    "last_sent_at": "2026-05-28T09:41:33+00:00",
+    "total_checks": 102
   },
-  "last_checked_at": "2026-05-28T05:48:48+00:00",
+  "last_checked_at": "2026-05-28T09:41:33+00:00",
   "plans": {
     "1 Bedroom": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "1 BEDROOM (MONTHLY INCOME REQUIRED)\nBed 1\nBath 1\nRent € 1.090 -\nto\n€ 1.767\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -17,7 +17,7 @@
     "1 Bedroom Superior": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "1 BEDROOM SUPERIOR (MONTHLY INCOME REQUIRED)\nBed 1\nBath 1\nRent € 2.114\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -25,7 +25,7 @@
     "2 Bedroom": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "2 BEDROOM (MONTHLY INCOME REQUIRED)\nBed 2\nBath 1\nRent € 1.957\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -33,7 +33,7 @@
     "2 Bedroom Superior": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "2 BEDROOM SUPERIOR (MONTHLY INCOME REQUIRED)\nBed 2\nBath 2\nRent € 2.182 -\nto\n€ 2.443\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -41,7 +41,7 @@
     "Executive Plus Studio": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "EXECUTIVE PLUS STUDIO (MONTHLY INCOME REQUIRED)\nBed Studio\nBath 1\nRent € 1.489 -\nto\n€ 1.568\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -49,7 +49,7 @@
     "Executive Plus Studio - Furnished": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "EXECUTIVE PLUS STUDIO - FURNISHED (MONTHLY INCOME REQUIRED)\nBed Studio\nBath 1\nRent € 1.159 -\nto\n€ 1.464\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -57,7 +57,7 @@
     "Executive Studio": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "EXECUTIVE STUDIO (MONTHLY INCOME REQUIRED)\nBed Studio\nBath 1\nRent € 1.042 -\nto\n€ 1.451\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -65,7 +65,7 @@
     "Standard Studio": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "STANDARD STUDIO\nBed Studio\nBath 1\nRent € 498\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -73,7 +73,7 @@
     "Studio Suite": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "STUDIO SUITE (MONTHLY INCOME REQUIRED)\nBed Studio\nBath 1\nRent € 1.104 -\nto\n€ 2.049\nGET NOTIFIED",
       "last_status": "unavailable"
@@ -81,7 +81,7 @@
     "Superior Studio": {
       "last_alert_signature": "",
       "last_button_text": "GET NOTIFIED",
-      "last_checked_at": "2026-05-28T05:48:48+00:00",
+      "last_checked_at": "2026-05-28T09:41:33+00:00",
       "last_mode": "ACTIVE_PANEL_BUTTON",
       "last_seen_context": "SUPERIOR STUDIO (MONTHLY INCOME REQUIRED)\nBed Studio\nBath 1\nRent € 932 -\nto\n€ 1.228\nGET NOTIFIED",
       "last_status": "unavailable"
