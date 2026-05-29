@@ -25,9 +25,11 @@ def main() -> int:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     url = os.getenv("OURDOMAIN_URL", DEFAULT_OURDOMAIN_URL).strip() or DEFAULT_OURDOMAIN_URL
+    fallback_url = os.getenv("OURDOMAIN_FALLBACK_URL", "").strip()
     state_path = os.getenv("STATE_PATH", "ourdomain_state.json").strip() or "ourdomain_state.json"
 
     print(f"[ourdomain-once] url={url}", flush=True)
+    print(f"[ourdomain-once] fallback_url={fallback_url or '(none)'}", flush=True)
     print(f"[ourdomain-once] state_path={state_path}", flush=True)
     print(
         f"[ourdomain-once] send_existing_on_first_run={os.getenv('SEND_EXISTING_ON_FIRST_RUN', 'false')}",

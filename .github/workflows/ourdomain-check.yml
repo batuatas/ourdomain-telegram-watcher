@@ -28,6 +28,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       OURDOMAIN_URL: "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing/ourdomain-amsterdam-south-east/floorplans.aspx"
+      OURDOMAIN_FALLBACK_URL: "https://www.rentcafe.co.uk/onlineleasing/ourdomain-amsterdam-south-east/floorplans.aspx"
       SEND_EXISTING_ON_FIRST_RUN: "false"
       SEND_HEARTBEAT: "true"
       HEARTBEAT_INTERVAL_MINUTES: "60"

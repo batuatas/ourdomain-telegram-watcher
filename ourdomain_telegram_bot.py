@@ -30,6 +30,10 @@ DEFAULT_OURDOMAIN_URL = (
     "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing/"
     "ourdomain-amsterdam-south-east/floorplans.aspx"
 )
+PAGE_READY_TIMEOUT_MS = 30000
+PAGE_READY_POLL_MS = 500
+TARGET_READY_TIMEOUT_MS = 10000
+TARGET_READY_POLL_MS = 250
 
 TARGET_FLOOR_PLANS = [
     "2 Bedroom Superior",
@@ -127,6 +131,13 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_str(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip()
+
+
 def now_utc() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -170,13 +181,16 @@ def text_matches_floor_plan(text: str, plan_name: str) -> bool:
     return text_key == plan_key
 
 
-def plan_matches_text(plan_name: str, text: str) -> bool:
-    haystack = upper_text(text)
-    aliases = [
+def make_plan_aliases(plan_name: str) -> list[str]:
+    return [
         plan_name,
         f"{plan_name} (monthly income required)",
     ]
-    return any(upper_text(alias) in haystack for alias in aliases)
+
+
+def plan_matches_text(plan_name: str, text: str) -> bool:
+    haystack = upper_text(text)
+    return any(upper_text(alias) in haystack for alias in make_plan_aliases(plan_name))
 
 
 def normalize_button_text(value: str) -> str:
@@ -359,33 +373,77 @@ def is_visible(handle: Any) -> bool:
         return False
 
 
-def find_floor_plan_tabs(page: Any) -> dict[str, Any]:
-    tabs: dict[str, Any] = {}
+def get_attr(handle: Any, name: str) -> str:
+    try:
+        return normalize_space(handle.get_attribute(name) or "")
+    except PlaywrightError:
+        return ""
+
+
+def short_outer_html(handle: Any, limit: int = 1600) -> str:
+    try:
+        value = handle.evaluate("(el) => String(el.outerHTML || '')")
+    except PlaywrightError:
+        return ""
+    return normalize_space(str(value))[:limit]
+
+
+def get_tag_name(handle: Any) -> str:
+    try:
+        value = handle.evaluate("(el) => el.tagName ? el.tagName.toLowerCase() : ''")
+    except PlaywrightError:
+        return ""
+    return normalize_space(str(value))
+
+
+def get_floor_plan_tab_infos(page: Any) -> list[dict[str, Any]]:
+    tab_infos: list[dict[str, Any]] = []
+    seen_plans: set[str] = set()
 
     preferred = page.locator('a[id^="ui-tab-"]').element_handles()
-    for handle in preferred:
+    source = preferred
+
+    if not source:
+        source = page.locator("a, button, [role='tab'], [role='button'], li, div, span").element_handles()
+
+    for handle in source:
         if not is_visible(handle):
             continue
         text = safe_text(handle)
         for plan in TARGET_FLOOR_PLANS:
-            if text_matches_floor_plan(text, plan):
-                tabs.setdefault(plan, handle)
-
-    missing = [plan for plan in TARGET_FLOOR_PLANS if plan not in tabs]
-    if missing:
-        candidates = page.locator("a, button, [role='tab'], [role='button'], li, div, span").element_handles()
-        for handle in candidates:
-            if not missing:
-                break
-            if not is_visible(handle):
+            if plan in seen_plans:
                 continue
-            text = safe_text(handle)
-            for plan in list(missing):
-                if text_matches_floor_plan(text, plan):
-                    tabs.setdefault(plan, handle)
-                    missing.remove(plan)
+            if text_matches_floor_plan(text, plan):
+                seen_plans.add(plan)
+                tab_infos.append(
+                    {
+                        "handle": handle,
+                        "index": len(tab_infos),
+                        "text": normalize_space(text),
+                        "plan_name": plan,
+                    }
+                )
+                break
+
+    return tab_infos
+
+
+def find_floor_plan_tabs(page: Any) -> dict[str, Any]:
+    tabs: dict[str, Any] = {}
+
+    for info in get_floor_plan_tab_infos(page):
+        tabs.setdefault(str(info["plan_name"]), info["handle"])
 
     return tabs
+
+
+def find_tab_for_plan(page: Any, plan_name: str) -> Optional[dict[str, Any]]:
+    tabs = get_floor_plan_tab_infos(page)
+    for info in tabs:
+        if info["plan_name"] == plan_name:
+            info["tabs"] = tabs
+            return info
+    return None
 
 
 def click_floor_plan(handle: Any, plan_name: str) -> bool:
@@ -460,62 +518,38 @@ def find_active_panel_for_plan(page: Any, plan_name: str) -> Optional[dict[str, 
     return useful[0] if useful else source[0]
 
 
-def wait_until_correct_panel_active(page: Any, plan_name: str, timeout_ms: int = 10000) -> tuple[bool, Optional[dict[str, Any]]]:
-    deadline = time.monotonic() + (timeout_ms / 1000)
-    last_panel: Optional[dict[str, Any]] = None
+def button_looks_tied_to_plan(plan_name: str, button: dict[str, Any]) -> bool:
+    if not button:
+        return False
 
-    while time.monotonic() < deadline:
-        panel = find_active_panel_for_plan(page, plan_name)
-        last_panel = panel
+    handle = button.get("handle")
+    haystack_parts = [
+        str(button.get("text", "")),
+        str(button.get("id", "")),
+        str(button.get("class_name", "")),
+        str(button.get("tag", "")),
+        str(button.get("name", "")),
+        str(button.get("value", "")),
+        str(button.get("aria_label", "")),
+        str(button.get("data_selenium_id", "")),
+        str(button.get("onclick", "")),
+        str(button.get("html", "")),
+    ]
 
-        if panel and plan_matches_text(plan_name, str(panel.get("text", ""))):
-            return True, panel
+    if handle is not None:
+        haystack_parts.extend(
+            [
+                get_attr(handle, "id"),
+                get_attr(handle, "name"),
+                get_attr(handle, "value"),
+                get_attr(handle, "aria-label"),
+                get_attr(handle, "data-selenium-id"),
+                get_attr(handle, "onclick"),
+                short_outer_html(handle),
+            ]
+        )
 
-        page.wait_for_timeout(250)
-
-    return False, last_panel
-
-
-def extract_button_context(button_handle: Any, page: Any) -> str:
-    script = """
-    (element) => {
-      const selectors = [
-        '.floorplan-card',
-        '.floorPlanCard',
-        '.floorplan',
-        '.unit-container',
-        '.card',
-        '.apartment',
-        '.fp-card',
-        'li',
-        'tr',
-        'section',
-        'article',
-        'div'
-      ];
-      let current = element;
-      while (current && current !== document.body) {
-        if (current.matches && selectors.some((selector) => current.matches(selector))) {
-          const text = (current.innerText || current.textContent || '').trim();
-          if (text.length >= 20) {
-            return text;
-          }
-        }
-        current = current.parentElement;
-      }
-      return (document.body.innerText || document.body.textContent || '').trim();
-    }
-    """
-
-    try:
-        text = button_handle.evaluate(script)
-    except PlaywrightError:
-        try:
-            text = page.locator("body").inner_text(timeout=2000)
-        except PlaywrightError:
-            text = ""
-
-    return compact_context(text)
+    return plan_matches_text(plan_name, " ".join(haystack_parts))
 
 
 def find_visible_action_buttons(container_handle: Any) -> list[dict[str, Any]]:
@@ -539,10 +573,14 @@ def find_visible_action_buttons(container_handle: Any) -> list[dict[str, Any]]:
         if not text or len(text) > 140:
             continue
 
-        try:
-            class_name = handle.get_attribute("class") or ""
-        except PlaywrightError:
-            class_name = ""
+        class_name = get_attr(handle, "class")
+        tag = get_tag_name(handle)
+        ident = get_attr(handle, "id")
+        name = get_attr(handle, "name")
+        value = get_attr(handle, "value")
+        aria_label = get_attr(handle, "aria-label")
+        data_selenium_id = get_attr(handle, "data-selenium-id")
+        onclick = get_attr(handle, "onclick")
 
         marker = f"{normalize_button_text(text)}|{box}"
         if marker in seen:
@@ -554,87 +592,268 @@ def find_visible_action_buttons(container_handle: Any) -> list[dict[str, Any]]:
                 "index": index,
                 "text": text,
                 "class_name": class_name,
+                "id": ident,
+                "tag": tag,
+                "name": name,
+                "value": value,
+                "aria_label": aria_label,
+                "data_selenium_id": data_selenium_id,
+                "onclick": onclick,
+                "html": short_outer_html(handle),
             }
         )
 
     return buttons
 
 
-def choose_best_button(buttons: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
-    if not buttons:
+def get_real_action_buttons_whole_page(page: Any) -> list[dict[str, Any]]:
+    try:
+        body = page.locator("body").element_handle(timeout=2000)
+    except PlaywrightError:
+        body = None
+
+    if body is None:
+        return []
+
+    return find_visible_action_buttons(body)
+
+
+def get_text_fallback_for_plan(page: Any, plan_name: str) -> Optional[dict[str, Any]]:
+    panel = find_active_panel_for_plan(page, plan_name)
+
+    if panel and is_availability_text_signal(str(panel.get("text", ""))) and plan_matches_text(plan_name, str(panel.get("text", ""))):
+        return {
+            "panel": panel,
+            "text": str(panel.get("text", "")),
+        }
+
+    candidates: list[dict[str, Any]] = []
+    for handle in page.locator("div, section, article, li, tr, td, span, table, tbody").element_handles():
+        if not is_visible(handle):
+            continue
+
+        text = safe_text(handle)
+        if not text or len(text) > 2500:
+            continue
+
+        upper = upper_text(text)
+        has_useful_details = (
+            "BED" in upper
+            or "BATH" in upper
+            or "RENT" in upper
+            or "CHECK AVAILABILITY" in upper
+        )
+
+        if plan_matches_text(plan_name, text) and is_availability_text_signal(text) and has_useful_details:
+            candidates.append(
+                {
+                    "handle": handle,
+                    "id": get_attr(handle, "id"),
+                    "class_name": get_attr(handle, "class"),
+                    "text": normalize_space(text),
+                }
+            )
+
+    candidates.sort(key=lambda item: len(str(item.get("text", ""))))
+    if not candidates:
         return None
 
-    scored: list[tuple[int, dict[str, Any]]] = []
-    for button in buttons:
-        text = str(button.get("text", ""))
-        if is_available_action_text(text):
-            score = 0
-        elif is_unavailable_action_text(text):
-            score = 2
-        elif text:
-            score = 1
-        else:
-            score = 3
-        scored.append((score, button))
-
-    scored.sort(key=lambda item: item[0])
-    return scored[0][1]
+    return {
+        "panel": candidates[0],
+        "text": str(candidates[0].get("text", "")),
+    }
 
 
-def inspect_plan(page: Any, plan_name: str, tab_handle: Any, previous: dict[str, Any], checked_at: str) -> PlanResult:
-    clicked = click_floor_plan(tab_handle, plan_name)
-    if clicked:
-        page.wait_for_timeout(1400)
+def wait_until_target_ready(page: Any, plan_name: str, timeout_ms: int = TARGET_READY_TIMEOUT_MS) -> tuple[bool, Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    last_panel: Optional[dict[str, Any]] = None
+    last_button: Optional[dict[str, Any]] = None
 
-    panel_ok, panel = wait_until_correct_panel_active(page, plan_name)
-    if not panel or not panel_ok or not plan_matches_text(plan_name, str(panel.get("text", ""))):
-        context = compact_context(str(panel.get("text", ""))) if panel else ""
-        status = f"active_panel_not_target_plan"
-        signature = make_alert_signature(plan_name, status, "", context)
-        panel_id = str(panel.get("id", "")) if panel else ""
-        print(
-            f"[ourdomain] {plan_name}: ACTIVE_PANEL_NOT_TARGET_PLAN panel={panel_id!r}",
-            flush=True,
-        )
-        return PlanResult(
-            plan_name=plan_name,
-            button_text="",
-            status=status,
-            mode="ACTIVE_PANEL_NOT_TARGET_PLAN",
-            alert_worthy=False,
-            alert_signature=signature,
-            context=context,
-            checked_at=checked_at,
-        )
+    while time.monotonic() < deadline:
+        panel = find_active_panel_for_plan(page, plan_name)
+        last_panel = panel
 
-    panel_handle = panel["handle"]
-    panel_text = str(panel.get("text", ""))
-    buttons = find_visible_action_buttons(panel_handle)
-    print(
-        f"[ourdomain] {plan_name}: panel={panel.get('id', '')!r} "
-        f"found {len(buttons)} visible action/contact button(s).",
-        flush=True,
-    )
+        if panel and plan_matches_text(plan_name, str(panel.get("text", ""))):
+            return True, panel, None
 
-    button = choose_best_button(buttons)
-    button_text = str(button.get("text", "")) if button else ""
-    mode = "ACTIVE_PANEL_BUTTON" if button else "NO_ACTIVE_PANEL_BUTTON"
-    context = compact_context(panel_text)
+        buttons = get_real_action_buttons_whole_page(page)
+        button = next((item for item in buttons if button_looks_tied_to_plan(plan_name, item)), None)
+        last_button = button
 
-    if not button and is_availability_text_signal(panel_text):
-        button_text = "CHECK AVAILABILITY"
-        mode = "ACTIVE_PANEL_TEXT_AVAILABLE_FALLBACK"
+        if button:
+            return True, panel, button
 
+        page.wait_for_timeout(TARGET_READY_POLL_MS)
+
+    return False, last_panel, last_button
+
+
+def result_from_button(
+    plan_name: str,
+    button: dict[str, Any],
+    panel: Optional[dict[str, Any]],
+    mode: str,
+    previous: dict[str, Any],
+    checked_at: str,
+) -> PlanResult:
+    button_text = normalize_space(str(button.get("text", "")))
+    panel_text = str(panel.get("text", "")) if panel else ""
+    context = compact_context(panel_text or " ".join([
+        str(button.get("text", "")),
+        str(button.get("id", "")),
+        str(button.get("class_name", "")),
+        str(button.get("onclick", "")),
+    ]))
     previous_button_text = str(previous.get("last_button_text", ""))
     status, alert_worthy = classify_action_state(button_text, context, previous_button_text)
     signature = make_alert_signature(plan_name, status, button_text, context)
 
     return PlanResult(
         plan_name=plan_name,
-        button_text=normalize_space(button_text),
+        button_text=button_text,
         status=status,
         mode=mode,
         alert_worthy=alert_worthy,
+        alert_signature=signature,
+        context=context,
+        checked_at=checked_at,
+    )
+
+
+def inspect_plan(page: Any, plan_name: str, tab_handle: Any, previous: dict[str, Any], checked_at: str) -> PlanResult:
+    clicked = click_floor_plan(tab_handle, plan_name)
+    if clicked:
+        page.wait_for_timeout(1800)
+
+    target_ready, ready_panel, ready_button = wait_until_target_ready(page, plan_name)
+    tab_info = find_tab_for_plan(page, plan_name)
+    tabs = tab_info.get("tabs", []) if tab_info else []
+    tab_index = int(tab_info.get("index", -1)) if tab_info else -1
+
+    panel = find_active_panel_for_plan(page, plan_name)
+    panel_matches_target = bool(panel and plan_matches_text(plan_name, str(panel.get("text", ""))))
+
+    if target_ready and ready_button and not panel_matches_target:
+        print(f"[ourdomain] {plan_name}: using MOBILE_OR_ID_MATCHED_BUTTON", flush=True)
+        return result_from_button(
+            plan_name,
+            ready_button,
+            panel,
+            "MOBILE_OR_ID_MATCHED_BUTTON",
+            previous,
+            checked_at,
+        )
+
+    if panel_matches_target and panel:
+        panel_handle = panel["handle"]
+        panel_text = str(panel.get("text", ""))
+        panel_buttons = find_visible_action_buttons(panel_handle)
+        print(
+            f"[ourdomain] {plan_name}: panel={panel.get('id', '')!r} "
+            f"found {len(panel_buttons)} visible action/contact button(s).",
+            flush=True,
+        )
+
+        if panel_buttons:
+            button = (
+                next((item for item in panel_buttons if is_available_action_text(str(item.get("text", "")))), None)
+                or next((item for item in panel_buttons if upper_text(str(item.get("text", ""))) == "GET NOTIFIED"), None)
+                or panel_buttons[0]
+            )
+            return result_from_button(
+                plan_name,
+                button,
+                panel,
+                "ACTIVE_PANEL_BUTTON",
+                previous,
+                checked_at,
+            )
+
+        if is_availability_text_signal(panel_text):
+            button = {
+                "handle": None,
+                "index": -1,
+                "text": "CHECK AVAILABILITY",
+                "id": "",
+                "class_name": "text-fallback",
+                "tag": "text",
+            }
+            return result_from_button(
+                plan_name,
+                button,
+                panel,
+                "ACTIVE_PANEL_TEXT_AVAILABLE_FALLBACK",
+                previous,
+                checked_at,
+            )
+
+    buttons = get_real_action_buttons_whole_page(page)
+    id_matched_button = next((button for button in buttons if button_looks_tied_to_plan(plan_name, button)), None)
+    if id_matched_button:
+        print(f"[ourdomain] {plan_name}: using MOBILE_OR_ID_MATCHED_BUTTON", flush=True)
+        return result_from_button(
+            plan_name,
+            id_matched_button,
+            panel,
+            "MOBILE_OR_ID_MATCHED_BUTTON",
+            previous,
+            checked_at,
+        )
+
+    if tabs and len(buttons) == len(tabs) and 0 <= tab_index < len(buttons):
+        print(f"[ourdomain] {plan_name}: using ORDER_MATCHED_BUTTONS_NO_PANEL", flush=True)
+        return result_from_button(
+            plan_name,
+            buttons[tab_index],
+            panel,
+            "ORDER_MATCHED_BUTTONS_NO_PANEL",
+            previous,
+            checked_at,
+        )
+
+    if len(buttons) == 1:
+        print(f"[ourdomain] {plan_name}: using SINGLE_VISIBLE_BUTTON_AFTER_CLICK", flush=True)
+        return result_from_button(
+            plan_name,
+            buttons[0],
+            panel,
+            "SINGLE_VISIBLE_BUTTON_AFTER_CLICK",
+            previous,
+            checked_at,
+        )
+
+    fallback = get_text_fallback_for_plan(page, plan_name)
+    if fallback and fallback.get("panel") and plan_matches_text(plan_name, str(fallback.get("text", ""))):
+        button = {
+            "handle": None,
+            "index": -1,
+            "text": "CHECK AVAILABILITY",
+            "id": "",
+            "class_name": "text-fallback",
+            "tag": "text",
+        }
+        print(f"[ourdomain] {plan_name}: using TEXT_AVAILABLE_FALLBACK", flush=True)
+        return result_from_button(
+            plan_name,
+            button,
+            fallback["panel"],
+            "TEXT_AVAILABLE_FALLBACK",
+            previous,
+            checked_at,
+        )
+
+    context = compact_context(str(panel.get("text", ""))) if panel else ""
+    reason = "TARGET_NOT_READY" if not target_ready else f"UNSAFE_BUTTON_COUNT tabs={len(tabs)}, buttons={len(buttons)}"
+    status = "mapping_problem"
+    signature = make_alert_signature(plan_name, status, reason, context)
+    print(f"[ourdomain] {plan_name}: mapping_problem {reason}", flush=True)
+
+    return PlanResult(
+        plan_name=plan_name,
+        button_text=reason,
+        status=status,
+        mode="MAPPING_PROBLEM",
+        alert_worthy=False,
         alert_signature=signature,
         context=context,
         checked_at=checked_at,
@@ -743,6 +962,72 @@ def heartbeat_is_due(heartbeat: dict[str, Any], checked_at: str, interval_minute
     return elapsed_seconds >= interval_minutes * 60
 
 
+def wait_for_floor_plan_tabs_to_load(page: Any, timeout_ms: int = PAGE_READY_TIMEOUT_MS) -> tuple[bool, dict[str, Any], int]:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    tabs: dict[str, Any] = {}
+    buttons_count = 0
+
+    while time.monotonic() < deadline:
+        tabs = find_floor_plan_tabs(page)
+        buttons_count = len(get_real_action_buttons_whole_page(page))
+
+        if len(tabs) >= len(TARGET_FLOOR_PLANS):
+            return True, tabs, buttons_count
+
+        page.wait_for_timeout(PAGE_READY_POLL_MS)
+
+    tabs = find_floor_plan_tabs(page)
+    buttons_count = len(get_real_action_buttons_whole_page(page))
+    return False, tabs, buttons_count
+
+
+def send_heartbeat_if_due(
+    state: dict[str, Any],
+    token: str,
+    chat_id: str,
+    checked_at: str,
+    send_heartbeat: bool,
+    heartbeat_interval_minutes: int,
+    found_plans: int,
+    alert_worthy: int,
+    alerts_sent: int,
+    url: str,
+    problem: str = "",
+) -> int:
+    heartbeat, checks_since_last, total_checks = update_heartbeat_counters(state)
+    should_send_heartbeat = (
+        send_heartbeat
+        and heartbeat_is_due(heartbeat, checked_at, heartbeat_interval_minutes)
+    )
+
+    print(
+        f"[ourdomain] heartbeat checks_since_last={checks_since_last} "
+        f"total_checks={total_checks} send={should_send_heartbeat}",
+        flush=True,
+    )
+
+    if not should_send_heartbeat:
+        return 0
+
+    send_telegram_message(
+        token,
+        chat_id,
+        format_heartbeat_message(
+            checked_at=checked_at,
+            checks_since_last=checks_since_last,
+            total_checks=total_checks,
+            found_plans=found_plans,
+            alert_worthy=alert_worthy,
+            alerts_sent=alerts_sent,
+            url=url,
+            problem=problem,
+        ),
+    )
+    heartbeat["last_sent_at"] = checked_at
+    heartbeat["checks_since_last"] = 0
+    return 1
+
+
 def check_once(
     token: str = "",
     chat_id: str = "",
@@ -750,6 +1035,7 @@ def check_once(
     state_path: Optional[str] = None,
 ) -> tuple[int, int, int]:
     url = (url or os.getenv("OURDOMAIN_URL", DEFAULT_OURDOMAIN_URL)).strip() or DEFAULT_OURDOMAIN_URL
+    fallback_url = env_str("OURDOMAIN_FALLBACK_URL", "")
     state_path = (state_path or os.getenv("STATE_PATH", "ourdomain_state.json")).strip() or "ourdomain_state.json"
     state = load_state(state_path)
     plans_state = state.get("plans", {})
@@ -768,6 +1054,7 @@ def check_once(
     locale = os.getenv("BROWSER_LOCALE", "en-GB").strip() or "en-GB"
 
     print(f"[ourdomain] url={url}", flush=True)
+    print(f"[ourdomain] fallback_url={fallback_url or '(none)'}", flush=True)
     print(f"[ourdomain] state_path={state_path}", flush=True)
     print(f"[ourdomain] send_existing_on_first_run={send_existing_on_first_run}", flush=True)
     print(
@@ -789,78 +1076,97 @@ def check_once(
                 ),
             )
             page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            urls_to_try = [url]
+            if fallback_url and fallback_url != url:
+                urls_to_try.append(fallback_url)
 
-            try:
-                page.wait_for_load_state("networkidle", timeout=20000)
-            except PlaywrightTimeoutError:
-                print("[ourdomain] Timed out waiting for network idle; continuing.", flush=True)
+            tabs: dict[str, Any] = {}
+            used_url = url
+            page_problem = ""
+            cloudflare_challenge = False
 
-            try:
-                page.wait_for_selector(
-                    f'a[id^="ui-tab-"], {ACTION_BUTTON_SELECTOR}',
-                    timeout=45000,
-                )
-            except PlaywrightTimeoutError:
-                print("[ourdomain] No tabs/buttons appeared before timeout; continuing with visible scan.", flush=True)
+            for index, candidate_url in enumerate(urls_to_try):
+                used_url = candidate_url
+                print(f"[ourdomain] loading_url={candidate_url}", flush=True)
+                page.goto(candidate_url, wait_until="domcontentloaded", timeout=60000)
 
-            title = ""
-            try:
-                title = page.title()
-            except PlaywrightError:
-                pass
+                try:
+                    page.wait_for_load_state("networkidle", timeout=20000)
+                except PlaywrightTimeoutError:
+                    print("[ourdomain] Timed out waiting for network idle; continuing.", flush=True)
 
-            body_text = ""
-            try:
-                body_text = page.locator("body").inner_text(timeout=5000)
-            except PlaywrightError:
+                title = ""
+                try:
+                    title = page.title()
+                except PlaywrightError:
+                    pass
+
                 body_text = ""
+                try:
+                    body_text = page.locator("body").inner_text(timeout=5000)
+                except PlaywrightError:
+                    body_text = ""
 
-            cloudflare_challenge = is_cloudflare_challenge(title, body_text)
-            print(f"[ourdomain] cloudflare_challenge={cloudflare_challenge}", flush=True)
+                cloudflare_challenge = is_cloudflare_challenge(title, body_text)
+                print(f"[ourdomain] cloudflare_challenge={cloudflare_challenge}", flush=True)
 
-            if cloudflare_challenge:
-                heartbeat, checks_since_last, total_checks = update_heartbeat_counters(state)
-                should_send_heartbeat = (
-                    send_heartbeat
-                    and heartbeat_is_due(heartbeat, checked_at, heartbeat_interval_minutes)
-                )
+                if cloudflare_challenge:
+                    page_problem = "Cloudflare challenge detected; previous state preserved and no availability decision was made."
+                    if index + 1 < len(urls_to_try):
+                        print("[ourdomain] primary had Cloudflare/page challenge; trying official fallback URL.", flush=True)
+                        continue
+                    break
+
+                ready, tabs, buttons_count = wait_for_floor_plan_tabs_to_load(page)
                 print(
-                    f"[ourdomain] heartbeat checks_since_last={checks_since_last} "
-                    f"total_checks={total_checks} send={should_send_heartbeat}",
+                    f"[ourdomain] readiness_ok={ready} tabs_found={len(tabs)}/{len(TARGET_FLOOR_PLANS)} "
+                    f"visible_action_buttons={buttons_count}",
                     flush=True,
                 )
 
-                if should_send_heartbeat:
-                    send_telegram_message(
-                        token,
-                        chat_id,
-                        format_heartbeat_message(
-                            checked_at=checked_at,
-                            checks_since_last=checks_since_last,
-                            total_checks=total_checks,
-                            found_plans=0,
-                            alert_worthy=0,
-                            alerts_sent=0,
-                            url=url,
-                            problem="Cloudflare challenge detected; preserved previous floor-plan state.",
-                        ),
+                if len(tabs) == 0 and index + 1 < len(urls_to_try):
+                    page_problem = "No floor-plan tabs found on primary URL; trying official fallback URL."
+                    print(f"[ourdomain] {page_problem}", flush=True)
+                    continue
+
+                if len(tabs) < len(TARGET_FLOOR_PLANS):
+                    page_problem = (
+                        f"Page did not expose all floor-plan tabs "
+                        f"({len(tabs)}/{len(TARGET_FLOOR_PLANS)}); previous state preserved."
                     )
-                    sent += 1
-                    heartbeat["last_sent_at"] = checked_at
-                    heartbeat["checks_since_last"] = 0
+                    if index + 1 < len(urls_to_try):
+                        print(f"[ourdomain] {page_problem} Trying fallback URL.", flush=True)
+                        continue
+                    break
+
+                page_problem = ""
+                break
+
+            if cloudflare_challenge or page_problem or len(tabs) < len(TARGET_FLOOR_PLANS):
+                sent += send_heartbeat_if_due(
+                    state=state,
+                    token=token,
+                    chat_id=chat_id,
+                    checked_at=checked_at,
+                    send_heartbeat=send_heartbeat,
+                    heartbeat_interval_minutes=heartbeat_interval_minutes,
+                    found_plans=len(tabs),
+                    alert_worthy=0,
+                    alerts_sent=sent,
+                    url=used_url,
+                    problem=page_problem or "Temporary page-read failure; previous state preserved and no availability decision was made.",
+                )
 
                 state["last_checked_at"] = checked_at
-                state["url"] = url
+                state["url"] = used_url
                 save_state(state_path, state)
                 print(
-                    f"[ourdomain] done cloudflare_challenge=true plans_found=0 "
-                    f"alert_worthy=0 alerts_sent={sent}",
+                    f"[ourdomain] done page_problem={page_problem!r} cloudflare_challenge={cloudflare_challenge} "
+                    f"plans_found={len(tabs)} alert_worthy=0 alerts_sent={sent}",
                     flush=True,
                 )
-                return 0, 0, sent
+                return len(tabs), 0, sent
 
-            tabs = find_floor_plan_tabs(page)
             print(f"[ourdomain] found {len(tabs)} target floor plan tab(s).", flush=True)
 
             for plan_name in TARGET_FLOOR_PLANS:
@@ -902,7 +1208,7 @@ def check_once(
                 )
 
                 if should_send:
-                    send_telegram_message(token, chat_id, format_telegram_message(result, url))
+                    send_telegram_message(token, chat_id, format_telegram_message(result, used_url))
                     sent += 1
                     time.sleep(1.0)
 
@@ -932,7 +1238,7 @@ def check_once(
                         found_plans=found_plans,
                         alert_worthy=alert_worthy,
                         alerts_sent=sent,
-                        url=url,
+                        url=used_url,
                     ),
                 )
                 sent += 1
@@ -940,7 +1246,7 @@ def check_once(
                 heartbeat["checks_since_last"] = 0
 
             state["last_checked_at"] = checked_at
-            state["url"] = url
+            state["url"] = used_url
             save_state(state_path, state)
         finally:
             browser.close()
