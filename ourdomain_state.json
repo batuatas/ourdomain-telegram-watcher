@@ -1,10 +1,10 @@
 {
   "heartbeat": {
     "checks_since_last": 0,
-    "last_sent_at": "2026-06-09T04:36:07+00:00",
-    "total_checks": 215
+    "last_sent_at": "2026-06-09T08:21:05+00:00",
+    "total_checks": 216
   },
-  "last_checked_at": "2026-06-09T04:36:07+00:00",
+  "last_checked_at": "2026-06-09T08:21:05+00:00",
   "plans": {
     "1 Bedroom": {
       "last_alert_signature": "",
@@ -87,6 +87,6 @@
       "last_status": "unavailable"
     }
   },
-  "url": "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing/ourdomain-amsterdam-south-east/floorplans.aspx",
+  "url": "https://www.rentcafe.co.uk/onlineleasing/ourdomain-amsterdam-south-east/floorplans.aspx",
   "version": 1
 }
