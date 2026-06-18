@@ -1,10 +1,10 @@
 {
   "heartbeat": {
     "checks_since_last": 0,
-    "last_sent_at": "2026-06-18T16:07:57+00:00",
-    "total_checks": 292
+    "last_sent_at": "2026-06-18T18:38:00+00:00",
+    "total_checks": 293
   },
-  "last_checked_at": "2026-06-18T16:07:57+00:00",
+  "last_checked_at": "2026-06-18T18:38:00+00:00",
   "plans": {
     "1 Bedroom": {
       "last_alert_signature": "",
